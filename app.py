@@ -162,7 +162,7 @@ MENTAL HEALTH CRISIS RULE: If someone mentions suicide or self-harm — respond 
 
 def ask_gemini(prompt: str, system: str) -> str:
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-1.5-flash",
         contents=prompt,
         config={"system_instruction": system}
     )
@@ -170,7 +170,7 @@ def ask_gemini(prompt: str, system: str) -> str:
 
 def ask_gemini_simple(prompt: str) -> str:
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-1.5-flash",
         contents=prompt
     )
     return response.text
