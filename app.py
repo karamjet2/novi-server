@@ -162,7 +162,7 @@ MENTAL HEALTH CRISIS RULE: If someone mentions suicide or self-harm — respond 
 
 def ask_groq(prompt: str, system: str) -> str:
     response = groq_client.chat.completions.create(
-        model="llama3-8b-8192",
+        model="llama-3.3-70b-versatile",
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": prompt}
@@ -173,7 +173,7 @@ def ask_groq(prompt: str, system: str) -> str:
 
 def ask_groq_simple(prompt: str) -> str:
     response = groq_client.chat.completions.create(
-        model="llama3-8b-8192",
+        model="llama-3.3-70b-versatile",
         messages=[
             {"role": "user", "content": prompt}
         ],
