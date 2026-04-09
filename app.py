@@ -9,7 +9,7 @@ from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 from elevenlabs.client import ElevenLabs
 from dotenv import load_dotenv
-import google.genai as genai
+from google import genai
 
 load_dotenv()
 
@@ -20,7 +20,7 @@ GEMINI_KEY     = os.getenv("GEMINI_API_KEY", "")
 ELEVENLABS_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 
 # Configure Gemini
-genai.configure(api_key=GEMINI_KEY)
+client = genai.Client(api_key=GEMINI_KEY)
 
 # ── In-memory storage ────────────────────────────────────────────
 user_profiles  = {}
@@ -161,16 +161,18 @@ MENTAL HEALTH CRISIS RULE: If someone mentions suicide or self-harm — respond 
 """.strip()
 
 def ask_gemini(prompt: str, system: str) -> str:
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        system_instruction=system,
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt,
+        config={"system_instruction": system}
     )
-    response = model.generate_content(prompt)
     return response.text
 
 def ask_gemini_simple(prompt: str) -> str:
-    model = genai.GenerativeModel(model_name="gemini-1.5-flash")
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt
+    )
     return response.text
 
 def get_el_client():
