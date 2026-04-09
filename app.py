@@ -1,6 +1,6 @@
 """
 Novi Cloud Backend v3.2
-Now powered by Google Gemini (free!) + ElevenLabs voices
+Now powered by Groq (free!) + ElevenLabs voices
 """
 
 import os
@@ -9,18 +9,18 @@ from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 from elevenlabs.client import ElevenLabs
 from dotenv import load_dotenv
-from google import genai
+from groq import Groq
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-GEMINI_KEY     = os.getenv("GEMINI_API_KEY", "")
+GROQ_KEY       = os.getenv("GROQ_API_KEY", "")
 ELEVENLABS_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 
-# Configure Gemini
-client = genai.Client(api_key=GEMINI_KEY)
+# Configure Groq
+groq_client = Groq(api_key=GROQ_KEY)
 
 # ── In-memory storage ────────────────────────────────────────────
 user_profiles  = {}
@@ -160,20 +160,26 @@ EMERGENCY RULE: If someone mentions chest pain, difficulty breathing, stroke sym
 MENTAL HEALTH CRISIS RULE: If someone mentions suicide or self-harm — respond with deep compassion, validate their pain, encourage them to reach out to a crisis helpline immediately. In Jordan call 110.
 """.strip()
 
-def ask_gemini(prompt: str, system: str) -> str:
-    response = client.models.generate_content(
-        model="gemini-2.0-flash-lite",
-        contents=prompt,
-        config={"system_instruction": system}
+def ask_groq(prompt: str, system: str) -> str:
+    response = groq_client.chat.completions.create(
+        model="llama3-8b-8192",
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=1000,
     )
-    return response.text
+    return response.choices[0].message.content
 
-def ask_gemini_simple(prompt: str) -> str:
-    response = client.models.generate_content(
-        model="gemini-2.0-flash-lite",
-        contents=prompt
+def ask_groq_simple(prompt: str) -> str:
+    response = groq_client.chat.completions.create(
+        model="llama3-8b-8192",
+        messages=[
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=500,
     )
-    return response.text
+    return response.choices[0].message.content
 
 def get_el_client():
     return ElevenLabs(api_key=ELEVENLABS_KEY)
@@ -182,11 +188,11 @@ def get_el_client():
 
 @app.route('/')
 def index():
-    return jsonify({"status": "Novi server v3.2 — Powered by Gemini! 🌿"})
+    return jsonify({"status": "Novi server v3.2 — Powered by Groq! 🌿"})
 
 @app.route('/health')
 def health():
-    return jsonify({"ok": True, "version": "3.2", "ai": "gemini"})
+    return jsonify({"ok": True, "version": "3.2", "ai": "groq"})
 
 @app.route('/personalities')
 def get_personalities():
@@ -240,7 +246,6 @@ def chat():
         user_profile = user_profiles.get(user_id, {})
         system       = get_system_prompt(personality, language, response_length, custom_prompt, user_profile)
 
-        # Build conversation with history
         history = chat_histories.get(user_id, [])
         if history:
             history_text = "\n".join([f"{'User' if m['role']=='user' else 'Novi'}: {m['content']}" for m in history[-10:]])
@@ -248,7 +253,7 @@ def chat():
         else:
             full_prompt = question
 
-        full_answer = ask_gemini(full_prompt, system)
+        full_answer = ask_groq(full_prompt, system)
 
         followups = []
         if "FOLLOWUP:" in full_answer:
@@ -343,7 +348,7 @@ def weekly_report():
     p            = PERSONALITIES.get(personality, PERSONALITIES["bestfriend"])
     try:
         prompt = f"{p['prompt']} {lang}\nGenerate a warm weekly health summary for {name}. Stats: water={avg_water:.1f} glasses/day, sleep={avg_sleep:.1f} hrs/night, exercise={avg_exercise:.1f} sessions/week, questions={questions}. Give 3-4 sentences with encouragement and 2 tips for next week."
-        report = ask_gemini_simple(prompt)
+        report = ask_groq_simple(prompt)
         return jsonify({"report": report, "stats": {"water": round(avg_water,1), "sleep": round(avg_sleep,1), "exercise": round(avg_exercise,1), "questions": questions}})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -355,7 +360,7 @@ def seasonal_tip():
     season   = get_current_season()
     lang     = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
     try:
-        tip = ask_gemini_simple(f"Give one specific health or nature tip for {season}. Practical and interesting. Under 2 sentences. {lang}")
+        tip = ask_groq_simple(f"Give one specific health or nature tip for {season}. Practical and interesting. Under 2 sentences. {lang}")
         return jsonify({"tip": tip, "season": season})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -372,7 +377,7 @@ def check_symptoms():
     lang = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
     try:
         system   = f"You are Novi, a knowledgeable health assistant. When someone describes symptoms, provide helpful general information about possible causes and natural remedies, but ALWAYS remind them to see a real doctor. Never diagnose definitively. {lang}"
-        response = ask_gemini(f"I have these symptoms: {symptoms}. What could this be and what natural remedies might help?", system)
+        response = ask_groq(f"I have these symptoms: {symptoms}. What could this be and what natural remedies might help?", system)
         return jsonify({"response": response, "severity": "moderate"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -388,7 +393,7 @@ def encyclopedia():
     lang   = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
     system = f"You are Novi, a nature encyclopedia expert. Give detailed, fascinating information about {category}s. Include: common name, scientific name, key facts, health benefits if any, interesting trivia, and where it's found. {lang}"
     try:
-        entry = ask_gemini(f"Tell me about: {query}", system)
+        entry = ask_groq(f"Tell me about: {query}", system)
         return jsonify({"entry": entry, "query": query, "category": category})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -399,7 +404,7 @@ def daily_tip():
     language = data.get("language", "en")
     lang     = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
     try:
-        tip = ask_gemini_simple(f"Give ONE short, practical, interesting health or nature tip for today. Fresh and motivating. Under 2 sentences. {lang}")
+        tip = ask_groq_simple(f"Give ONE short, practical, interesting health or nature tip for today. Fresh and motivating. Under 2 sentences. {lang}")
         return jsonify({"tip": tip})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -410,7 +415,7 @@ def nature_fact():
     language = data.get("language", "en")
     lang     = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
     try:
-        fact = ask_gemini_simple(f"Share ONE fascinating, surprising nature fact most people don't know. Mind-blowing and fun! Under 2 sentences. {lang}")
+        fact = ask_groq_simple(f"Share ONE fascinating, surprising nature fact most people don't know. Mind-blowing and fun! Under 2 sentences. {lang}")
         return jsonify({"fact": fact})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -425,7 +430,7 @@ def mood_response():
     p           = PERSONALITIES.get(personality, PERSONALITIES["bestfriend"])
     try:
         system   = f"{p['prompt']} You specialize in nature and health. {lang}"
-        response = ask_gemini(f"I'm feeling {mood} today. Give me a short, caring nature or health tip that matches my mood. Warm and under 3 sentences.", system)
+        response = ask_groq(f"I'm feeling {mood} today. Give me a short, caring nature or health tip that matches my mood. Warm and under 3 sentences.", system)
         return jsonify({"response": response})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
