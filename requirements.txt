@@ -5,3 +5,4 @@ elevenlabs
 python-dotenv
 gunicorn
 groq
+requests
