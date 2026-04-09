@@ -502,7 +502,7 @@ def transcribe():
         return jsonify({"error": "No audio provided"}), 400
     try:
         audio_bytes = base64.b64decode(audio_base64)
-        # Try m4a first, fallback to wav
+        # Try m4a first, fallback to wavس
         for ext, mime in [(".m4a", "audio/m4a"), (".wav", "audio/wav"), (".mp4", "audio/mp4")]:
             try:
                 with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
