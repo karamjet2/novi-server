@@ -1,24 +1,26 @@
 """
-Novi Cloud Backend v3.1
-Mental health advisor, better indirect questions, weather support
+Novi Cloud Backend v3.2
+Now powered by Google Gemini (free!) + ElevenLabs voices
 """
 
 import os
-import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
-from anthropic import Anthropic
 from elevenlabs.client import ElevenLabs
 from dotenv import load_dotenv
+import google.generativeai as genai
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-ANTHROPIC_KEY  = os.getenv("ANTHROPIC_API_KEY", "")
+GEMINI_KEY     = os.getenv("GEMINI_API_KEY", "")
 ELEVENLABS_KEY = os.getenv("ELEVENLABS_API_KEY", "")
+
+# Configure Gemini
+genai.configure(api_key=GEMINI_KEY)
 
 # ── In-memory storage ────────────────────────────────────────────
 user_profiles  = {}
@@ -33,27 +35,27 @@ PERSONALITIES = {
     },
     "scientist": {
         "name": "Nature Scientist", "emoji": "🔬",
-        "prompt": "You are Novi, a knowledgeable nature and health scientist. Use scientific terminology but explain clearly. Cite mechanisms, mention studies, distinguish proven facts from emerging research. For mental health questions, reference neuroscience and psychology research."
+        "prompt": "You are Novi, a knowledgeable nature and health scientist. Use scientific terminology but explain clearly. Cite mechanisms, mention studies, distinguish proven facts from emerging research."
     },
     "comedian": {
         "name": "Funny & Playful", "emoji": "😄",
-        "prompt": "You are Novi, a hilarious nature robot who makes health FUN. Crack jokes, use funny comparisons and puns — but keep information 100% accurate. Even serious topics like mental health get a gentle, uplifting spin."
+        "prompt": "You are Novi, a hilarious nature robot who makes health FUN. Crack jokes, use funny comparisons and puns — but keep information 100% accurate."
     },
     "wiseguide": {
         "name": "Wise Nature Guide", "emoji": "🌳",
-        "prompt": "You are Novi, a wise serene nature guide. Speak thoughtfully and poetically. Reference ancient traditions and the interconnectedness of all living things. For mental health, draw wisdom from ancient healing traditions, meditation, and the healing power of nature."
+        "prompt": "You are Novi, a wise serene nature guide. Speak thoughtfully and poetically. Reference ancient traditions and the interconnectedness of all living things."
     },
     "coach": {
         "name": "Health Coach", "emoji": "💪",
-        "prompt": "You are Novi, an energetic health coach. Be encouraging, action-oriented, and practical. Give specific tips and always motivate the person. For mental health, focus on actionable steps, routines, and building resilience."
+        "prompt": "You are Novi, an energetic health coach. Be encouraging, action-oriented, and practical. Give specific tips and always motivate the person."
     },
     "storyteller": {
         "name": "Nature Storyteller", "emoji": "📖",
-        "prompt": "You are Novi, a captivating storyteller. Bring nature and health to life through vivid stories, historical tales, and fascinating narratives. For mental health topics, share healing stories and metaphors from nature."
+        "prompt": "You are Novi, a captivating storyteller. Bring nature and health to life through vivid stories, historical tales, and fascinating narratives."
     },
     "doctor": {
         "name": "Caring Doctor", "emoji": "👨‍⚕️",
-        "prompt": "You are Novi, a caring integrative medicine doctor. Be thorough and safety-focused. Explain clearly and always mention when to see a real doctor. For mental health, take a clinical but compassionate approach."
+        "prompt": "You are Novi, a caring integrative medicine doctor. Be thorough and safety-focused. Explain clearly and always mention when to see a real doctor."
     },
     "explorer": {
         "name": "Nature Explorer", "emoji": "🌍",
@@ -61,7 +63,7 @@ PERSONALITIES = {
     },
     "mentalhealth": {
         "name": "Mental Health Advisor", "emoji": "🧘",
-        "prompt": "You are Novi, a warm, empathetic mental health advisor who specializes in nature-based wellness and holistic healing. You deeply understand emotions and always validate feelings before offering advice. You connect mental wellness to nature, herbs, breathing exercises, mindfulness, and holistic health. You are compassionate, patient, non-judgmental, and always encouraging. You suggest natural approaches to anxiety, stress, depression, grief, loneliness, burnout, and emotional wellbeing. You use gentle, calming language. You always remind people that seeking professional help is a sign of strength, not weakness."
+        "prompt": "You are Novi, a warm, empathetic mental health advisor who specializes in nature-based wellness and holistic healing. You deeply understand emotions and always validate feelings before offering advice. You connect mental wellness to nature, herbs, breathing exercises, mindfulness, and holistic health. You are compassionate, patient, non-judgmental, and always encouraging."
     },
 }
 
@@ -106,7 +108,7 @@ def get_current_season():
     return SEASONS.get(datetime.now().month, "spring")
 
 def get_system_prompt(personality="bestfriend", language="en", response_length="medium", custom_prompt="", user_profile=None):
-    p = PERSONALITIES.get(personality, PERSONALITIES["bestfriend"])
+    p      = PERSONALITIES.get(personality, PERSONALITIES["bestfriend"])
     lang   = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
     length = RESPONSE_LENGTHS.get(response_length, RESPONSE_LENGTHS["medium"])
 
@@ -117,12 +119,9 @@ def get_system_prompt(personality="bestfriend", language="en", response_length="
         name  = user_profile.get("name", "")
         goals = user_profile.get("goals", "")
         prefs = user_profile.get("preferences", "")
-        if name:
-            user_section = f"\nUSER INFO: The user's name is {name}."
-        if goals:
-            user_section += f" Their health goals are: {goals}."
-        if prefs:
-            user_section += f" Their preferences: {prefs}."
+        if name:  user_section  = f"\nUSER INFO: The user's name is {name}."
+        if goals: user_section += f" Their health goals are: {goals}."
+        if prefs: user_section += f" Their preferences: {prefs}."
 
     return f"""
 {p['prompt']}
@@ -140,10 +139,10 @@ YOUR AREAS OF EXPERTISE:
 
 HOW TO HANDLE DIFFERENT QUESTIONS:
 1. Direct nature/health questions → Answer fully and enthusiastically
-2. Mental health and emotional questions → Always validate feelings first, then offer nature-based wellness advice. Be compassionate.
-3. Indirect questions that connect to health/nature → Find the health or nature angle and answer from that perspective. Example: "I'm stressed about exams" → give stress relief tips from nature
-4. Weather questions → Answer and connect to health/nature (how weather affects mood, what plants thrive, seasonal health tips)
-5. Lifestyle questions (sleep, food, exercise, relationships) → Answer with health and nature perspective
+2. Mental health and emotional questions → Validate feelings first, then offer nature-based wellness advice
+3. Indirect questions that connect to health/nature → Find the health or nature angle and answer from that perspective
+4. Weather questions → Answer and connect to health/nature
+5. Lifestyle questions → Answer with health and nature perspective
 6. Completely unrelated questions (tech, politics, sports, entertainment, math) → Say warmly: "That's a bit outside my nature and health world! But ask me anything about wellness, plants, or the natural world 🌿"
 
 ANSWER QUALITY RULES:
@@ -158,11 +157,21 @@ LANGUAGE RULE: {lang}
 
 EMERGENCY RULE: If someone mentions chest pain, difficulty breathing, stroke symptoms, or overdose — immediately say: "This sounds like a medical emergency! Please call emergency services right away!"
 
-MENTAL HEALTH CRISIS RULE: If someone mentions suicide, self-harm, or wanting to die — respond with deep compassion, validate their pain, encourage them to reach out to a crisis helpline or trusted person immediately, and remind them that help is available and things can get better.
+MENTAL HEALTH CRISIS RULE: If someone mentions suicide or self-harm — respond with deep compassion, validate their pain, encourage them to reach out to a crisis helpline immediately. In Jordan call 110.
 """.strip()
 
-def get_client():
-    return Anthropic(api_key=ANTHROPIC_KEY)
+def ask_gemini(prompt: str, system: str) -> str:
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        system_instruction=system,
+    )
+    response = model.generate_content(prompt)
+    return response.text
+
+def ask_gemini_simple(prompt: str) -> str:
+    model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+    response = model.generate_content(prompt)
+    return response.text
 
 def get_el_client():
     return ElevenLabs(api_key=ELEVENLABS_KEY)
@@ -171,11 +180,11 @@ def get_el_client():
 
 @app.route('/')
 def index():
-    return jsonify({"status": "Novi server v3.1 🌿"})
+    return jsonify({"status": "Novi server v3.2 — Powered by Gemini! 🌿"})
 
 @app.route('/health')
 def health():
-    return jsonify({"ok": True, "version": "3.1"})
+    return jsonify({"ok": True, "version": "3.2", "ai": "gemini"})
 
 @app.route('/personalities')
 def get_personalities():
@@ -193,7 +202,7 @@ def get_profile():
 
 @app.route('/profile', methods=['POST'])
 def save_profile():
-    data = request.get_json()
+    data    = request.get_json()
     user_id = data.get("user_id", "default")
     user_profiles[user_id] = {
         "name":        data.get("name", ""),
@@ -217,7 +226,7 @@ def chat():
         return jsonify({"error": "No question provided"}), 400
 
     if is_emergency(question):
-        return jsonify({"answer": "🚨 This sounds like a medical emergency! Please call emergency services right away! Don't wait!", "followups": []})
+        return jsonify({"answer": "🚨 This sounds like a medical emergency! Please call emergency services right away!", "followups": []})
 
     if is_crisis(question):
         return jsonify({
@@ -226,22 +235,18 @@ def chat():
         })
 
     try:
-        client       = get_client()
         user_profile = user_profiles.get(user_id, {})
-        history      = chat_histories.get(user_id, [])
+        system       = get_system_prompt(personality, language, response_length, custom_prompt, user_profile)
 
-        messages = []
-        for msg in history[-10:]:
-            messages.append({"role": msg["role"], "content": msg["content"]})
-        messages.append({"role": "user", "content": question})
+        # Build conversation with history
+        history = chat_histories.get(user_id, [])
+        if history:
+            history_text = "\n".join([f"{'User' if m['role']=='user' else 'Novi'}: {m['content']}" for m in history[-10:]])
+            full_prompt  = f"Previous conversation:\n{history_text}\n\nUser: {question}"
+        else:
+            full_prompt = question
 
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=500,
-            system=get_system_prompt(personality, language, response_length, custom_prompt, user_profile),
-            messages=messages
-        )
-        full_answer = response.content[0].text
+        full_answer = ask_gemini(full_prompt, system)
 
         followups = []
         if "FOLLOWUP:" in full_answer:
@@ -267,8 +272,8 @@ def chat():
 
 @app.route('/history', methods=['GET'])
 def get_history():
-    user_id = request.args.get("user_id", "default")
-    history = chat_histories.get(user_id, [])
+    user_id  = request.args.get("user_id", "default")
+    history  = chat_histories.get(user_id, [])
     messages = []
     for msg in history:
         messages.append({
@@ -306,11 +311,9 @@ def log_health():
         existing.update({k: v for k, v in data.items() if k not in ["user_id"]})
     else:
         health_logs[user_id].append({
-            "date":     today,
-            "water":    data.get("water", 0),
-            "sleep":    data.get("sleep", 0),
-            "exercise": data.get("exercise", 0),
-            "mood":     data.get("mood", ""),
+            "date": today, "water": data.get("water", 0),
+            "sleep": data.get("sleep", 0), "exercise": data.get("exercise", 0),
+            "mood": data.get("mood", ""),
         })
     return jsonify({"ok": True})
 
@@ -325,32 +328,21 @@ def weekly_report():
     user_id     = data.get("user_id", "default")
     language    = data.get("language", "en")
     personality = data.get("personality", "bestfriend")
-
-    logs     = health_logs.get(user_id, [])
-    history  = chat_histories.get(user_id, [])
-    profile  = user_profiles.get(user_id, {})
-    week_logs = logs[-7:] if logs else []
-
+    logs        = health_logs.get(user_id, [])
+    history     = chat_histories.get(user_id, [])
+    profile     = user_profiles.get(user_id, {})
+    week_logs   = logs[-7:] if logs else []
     avg_water    = sum(l.get("water",    0) for l in week_logs) / max(len(week_logs), 1)
     avg_sleep    = sum(l.get("sleep",    0) for l in week_logs) / max(len(week_logs), 1)
     avg_exercise = sum(l.get("exercise", 0) for l in week_logs) / max(len(week_logs), 1)
     questions    = len([m for m in history[-50:] if m["role"] == "user"])
     name         = profile.get("name", "friend")
-
+    lang         = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
+    p            = PERSONALITIES.get(personality, PERSONALITIES["bestfriend"])
     try:
-        client = get_client()
-        lang   = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
-        p      = PERSONALITIES.get(personality, PERSONALITIES["bestfriend"])
-        prompt = f"{p['prompt']} {lang}\nGenerate a warm, encouraging weekly health summary for {name}.\nStats: water={avg_water:.1f} glasses/day, sleep={avg_sleep:.1f} hrs/night, exercise={avg_exercise:.1f} sessions/week, questions asked={questions}.\nGive 3-4 sentences with encouragement and 2 tips for next week."
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=200,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return jsonify({"report": response.content[0].text, "stats": {
-            "water": round(avg_water, 1), "sleep": round(avg_sleep, 1),
-            "exercise": round(avg_exercise, 1), "questions": questions
-        }})
+        prompt = f"{p['prompt']} {lang}\nGenerate a warm weekly health summary for {name}. Stats: water={avg_water:.1f} glasses/day, sleep={avg_sleep:.1f} hrs/night, exercise={avg_exercise:.1f} sessions/week, questions={questions}. Give 3-4 sentences with encouragement and 2 tips for next week."
+        report = ask_gemini_simple(prompt)
+        return jsonify({"report": report, "stats": {"water": round(avg_water,1), "sleep": round(avg_sleep,1), "exercise": round(avg_exercise,1), "questions": questions}})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -359,15 +351,10 @@ def seasonal_tip():
     data     = request.get_json()
     language = data.get("language", "en")
     season   = get_current_season()
+    lang     = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
     try:
-        client = get_client()
-        lang   = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=150,
-            messages=[{"role": "user", "content": f"Give one specific health or nature tip for {season}. Practical and interesting. Under 2 sentences. {lang}"}]
-        )
-        return jsonify({"tip": response.content[0].text, "season": season})
+        tip = ask_gemini_simple(f"Give one specific health or nature tip for {season}. Practical and interesting. Under 2 sentences. {lang}")
+        return jsonify({"tip": tip, "season": season})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -376,23 +363,15 @@ def check_symptoms():
     data     = request.get_json()
     symptoms = data.get("symptoms", "")
     language = data.get("language", "en")
-
     if not symptoms:
         return jsonify({"error": "No symptoms provided"}), 400
-
     if is_emergency(symptoms):
         return jsonify({"response": "These symptoms sound serious! Please call emergency services or go to the nearest hospital immediately!", "severity": "emergency"})
-
+    lang = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
     try:
-        client = get_client()
-        lang   = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=300,
-            system=f"You are Novi, a knowledgeable health assistant. When someone describes symptoms, provide helpful general information about possible causes and natural remedies, but ALWAYS remind them to see a real doctor for proper diagnosis. Never diagnose definitively. {lang}",
-            messages=[{"role": "user", "content": f"I have these symptoms: {symptoms}. What could this be and what natural remedies might help?"}]
-        )
-        return jsonify({"response": response.content[0].text, "severity": "moderate"})
+        system   = f"You are Novi, a knowledgeable health assistant. When someone describes symptoms, provide helpful general information about possible causes and natural remedies, but ALWAYS remind them to see a real doctor. Never diagnose definitively. {lang}"
+        response = ask_gemini(f"I have these symptoms: {symptoms}. What could this be and what natural remedies might help?", system)
+        return jsonify({"response": response, "severity": "moderate"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -402,38 +381,24 @@ def encyclopedia():
     query    = data.get("query", "")
     language = data.get("language", "en")
     category = data.get("category", "plant")
-
     if not query:
         return jsonify({"error": "No query provided"}), 400
-
+    lang   = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
+    system = f"You are Novi, a nature encyclopedia expert. Give detailed, fascinating information about {category}s. Include: common name, scientific name, key facts, health benefits if any, interesting trivia, and where it's found. {lang}"
     try:
-        client = get_client()
-        lang   = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=400,
-            system=f"You are Novi, a nature encyclopedia expert. Give detailed, fascinating information about {category}s. Include: common name, scientific name, key facts, health benefits if any, interesting trivia, and where it's found. Be engaging and educational. {lang}",
-            messages=[{"role": "user", "content": f"Tell me about: {query}"}]
-        )
-        return jsonify({"entry": response.content[0].text, "query": query, "category": category})
+        entry = ask_gemini(f"Tell me about: {query}", system)
+        return jsonify({"entry": entry, "query": query, "category": category})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/daily-tip', methods=['POST'])
 def daily_tip():
-    data        = request.get_json()
-    language    = data.get("language", "en")
-    personality = data.get("personality", "bestfriend")
+    data     = request.get_json()
+    language = data.get("language", "en")
+    lang     = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
     try:
-        client = get_client()
-        lang   = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=150,
-            system=f"You are Novi, a nature and health AI. Give ONE short, practical, interesting health or nature tip for today. Fresh and motivating. Under 2 sentences. {lang}",
-            messages=[{"role": "user", "content": "Give me today's health tip"}]
-        )
-        return jsonify({"tip": response.content[0].text})
+        tip = ask_gemini_simple(f"Give ONE short, practical, interesting health or nature tip for today. Fresh and motivating. Under 2 sentences. {lang}")
+        return jsonify({"tip": tip})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -441,16 +406,10 @@ def daily_tip():
 def nature_fact():
     data     = request.get_json()
     language = data.get("language", "en")
+    lang     = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
     try:
-        client = get_client()
-        lang   = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=150,
-            system=f"You are Novi, a nature expert. Share ONE fascinating, surprising nature fact most people don't know. Mind-blowing and fun! Under 2 sentences. {lang}",
-            messages=[{"role": "user", "content": "Give me an amazing nature fact"}]
-        )
-        return jsonify({"fact": response.content[0].text})
+        fact = ask_gemini_simple(f"Share ONE fascinating, surprising nature fact most people don't know. Mind-blowing and fun! Under 2 sentences. {lang}")
+        return jsonify({"fact": fact})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -460,17 +419,12 @@ def mood_response():
     mood        = data.get("mood", "okay")
     language    = data.get("language", "en")
     personality = data.get("personality", "bestfriend")
+    lang        = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
+    p           = PERSONALITIES.get(personality, PERSONALITIES["bestfriend"])
     try:
-        client = get_client()
-        lang   = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS["en"])
-        p      = PERSONALITIES.get(personality, PERSONALITIES["bestfriend"])
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=150,
-            system=f"{p['prompt']} You specialize in nature and health. {lang}",
-            messages=[{"role": "user", "content": f"I'm feeling {mood} today. Give me a short, caring nature or health tip that matches my mood. Warm and under 3 sentences."}]
-        )
-        return jsonify({"response": response.content[0].text})
+        system   = f"{p['prompt']} You specialize in nature and health. {lang}"
+        response = ask_gemini(f"I'm feeling {mood} today. Give me a short, caring nature or health tip that matches my mood. Warm and under 3 sentences.", system)
+        return jsonify({"response": response})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -479,15 +433,12 @@ def speak():
     data     = request.get_json()
     text     = data.get("text", "")
     voice_id = data.get("voice_id", "QngvLQR8bsLR5bzoa6Vv")
-
     if not text:
         return jsonify({"error": "No text provided"}), 400
-
     try:
         el_client  = get_el_client()
         audio      = el_client.text_to_speech.convert(
-            voice_id=voice_id,
-            text=text[:500],
+            voice_id=voice_id, text=text[:500],
             model_id="eleven_multilingual_v2",
             voice_settings={"stability": 0.5, "similarity_boost": 0.75, "style": 0.5, "use_speaker_boost": True}
         )
@@ -499,49 +450,49 @@ def speak():
 @app.route('/voices')
 def get_voices():
     voices = [
-        {"id": "QngvLQR8bsLR5bzoa6Vv", "name": "Michael",    "gender": "male",    "accent": "British",        "language": "en", "desc": "Expressive, Engaging & Warm"},
-        {"id": "CwhRBWXzGAHq8TQ4Fs17", "name": "Roger",      "gender": "male",    "accent": "American",       "language": "en", "desc": "Laid-Back & Casual"},
-        {"id": "JBFqnCBsd6RMkjVDRZzb", "name": "George",     "gender": "male",    "accent": "British",        "language": "en", "desc": "Warm Captivating Storyteller"},
-        {"id": "IKne3meq5aSn9XLyUdCD", "name": "Charlie",    "gender": "male",    "accent": "Australian",     "language": "en", "desc": "Deep, Confident, Energetic"},
-        {"id": "N2lVS1w4EtoT3dr4eOWO", "name": "Callum",     "gender": "male",    "accent": "American",       "language": "en", "desc": "Husky Trickster"},
-        {"id": "SOYHLrjzK2X1ezoPC6cr", "name": "Harry",      "gender": "male",    "accent": "American",       "language": "en", "desc": "Fierce Warrior"},
-        {"id": "TX3LPaxmHKxFdv7VOQHJ", "name": "Liam",       "gender": "male",    "accent": "American",       "language": "en", "desc": "Energetic Social Media Creator"},
-        {"id": "nPczCjzI2devNBz1zQrb", "name": "Brian",      "gender": "male",    "accent": "American",       "language": "en", "desc": "Deep, Resonant & Comforting"},
-        {"id": "onwK4e9ZLuTAKqWW03F9", "name": "Daniel",     "gender": "male",    "accent": "British",        "language": "en", "desc": "Steady Broadcaster"},
-        {"id": "pNInz6obpgDQGcFmaJgB", "name": "Adam",       "gender": "male",    "accent": "American",       "language": "en", "desc": "Dominant & Firm"},
-        {"id": "bIHbv24MWmeRgasZH58o", "name": "Will",       "gender": "male",    "accent": "American",       "language": "en", "desc": "Relaxed Optimist"},
-        {"id": "iP95p4xoKVk53GoZ742B", "name": "Chris",      "gender": "male",    "accent": "American",       "language": "en", "desc": "Charming, Down-to-Earth"},
-        {"id": "UgBBYS2sOqTuMpoF3BR0", "name": "Mark",       "gender": "male",    "accent": "American",       "language": "en", "desc": "Natural Conversations"},
-        {"id": "EOVAuWqgSZN2Oel78Psj", "name": "Aidan",      "gender": "male",    "accent": "American",       "language": "en", "desc": "Social Media Influencer"},
-        {"id": "fjnwTZkKtQOJaYzGLa6n", "name": "William",    "gender": "male",    "accent": "British",        "language": "en", "desc": "Deep Engaging Storyteller"},
-        {"id": "wAGzRVkxKEs8La0lmdrE", "name": "Sully",      "gender": "male",    "accent": "American",       "language": "en", "desc": "Mature, Deep & Intriguing"},
-        {"id": "EXAVITQu4vr4xnSDxMaL", "name": "Sarah",      "gender": "female",  "accent": "American",       "language": "en", "desc": "Mature, Reassuring & Confident"},
-        {"id": "FGY2WhTYpPnrIDTdsKH5", "name": "Laura",      "gender": "female",  "accent": "American",       "language": "en", "desc": "Enthusiast, Quirky Attitude"},
-        {"id": "Xb7hH8MSUJpSbSDYk0k2", "name": "Alice",      "gender": "female",  "accent": "British",        "language": "en", "desc": "Clear, Engaging Educator"},
-        {"id": "XrExE9yKIg1WjnnlVkGX", "name": "Matilda",    "gender": "female",  "accent": "American",       "language": "en", "desc": "Knowledgeable & Professional"},
-        {"id": "cgSgspJ2msm6clMCkdW9", "name": "Jessica",    "gender": "female",  "accent": "American",       "language": "en", "desc": "Playful, Bright & Warm"},
-        {"id": "hpp4J3VqNfWAUOO0d1Us", "name": "Bella",      "gender": "female",  "accent": "American",       "language": "en", "desc": "Professional, Bright & Warm"},
-        {"id": "pFZP5JQG7iQjIQuC4Bku", "name": "Lily",       "gender": "female",  "accent": "British",        "language": "en", "desc": "Velvety Actress"},
-        {"id": "F7hCTbeEDbm7osolS21j", "name": "Amanda",     "gender": "female",  "accent": "American",       "language": "en", "desc": "Warm, Polished & Engaging"},
-        {"id": "0fbdXLXuDBZXm2IHek4L", "name": "Veda Sky",   "gender": "female",  "accent": "American",       "language": "en", "desc": "Warm Healthcare Support"},
-        {"id": "l4Coq6695JDX9xtLqXDE", "name": "Lauren",     "gender": "female",  "accent": "American",       "language": "en", "desc": "Empathetic & Encouraging"},
-        {"id": "SAz9YHcvj6GT2YYXdXww", "name": "River",      "gender": "neutral", "accent": "American",       "language": "en", "desc": "Relaxed, Neutral & Informative"},
+        {"id": "QngvLQR8bsLR5bzoa6Vv", "name": "Michael",    "gender": "male",    "accent": "British",         "language": "en", "desc": "Expressive, Engaging & Warm"},
+        {"id": "CwhRBWXzGAHq8TQ4Fs17", "name": "Roger",      "gender": "male",    "accent": "American",        "language": "en", "desc": "Laid-Back & Casual"},
+        {"id": "JBFqnCBsd6RMkjVDRZzb", "name": "George",     "gender": "male",    "accent": "British",         "language": "en", "desc": "Warm Captivating Storyteller"},
+        {"id": "IKne3meq5aSn9XLyUdCD", "name": "Charlie",    "gender": "male",    "accent": "Australian",      "language": "en", "desc": "Deep, Confident, Energetic"},
+        {"id": "N2lVS1w4EtoT3dr4eOWO", "name": "Callum",     "gender": "male",    "accent": "American",        "language": "en", "desc": "Husky Trickster"},
+        {"id": "SOYHLrjzK2X1ezoPC6cr", "name": "Harry",      "gender": "male",    "accent": "American",        "language": "en", "desc": "Fierce Warrior"},
+        {"id": "TX3LPaxmHKxFdv7VOQHJ", "name": "Liam",       "gender": "male",    "accent": "American",        "language": "en", "desc": "Energetic Social Media Creator"},
+        {"id": "nPczCjzI2devNBz1zQrb", "name": "Brian",      "gender": "male",    "accent": "American",        "language": "en", "desc": "Deep, Resonant & Comforting"},
+        {"id": "onwK4e9ZLuTAKqWW03F9", "name": "Daniel",     "gender": "male",    "accent": "British",         "language": "en", "desc": "Steady Broadcaster"},
+        {"id": "pNInz6obpgDQGcFmaJgB", "name": "Adam",       "gender": "male",    "accent": "American",        "language": "en", "desc": "Dominant & Firm"},
+        {"id": "bIHbv24MWmeRgasZH58o", "name": "Will",       "gender": "male",    "accent": "American",        "language": "en", "desc": "Relaxed Optimist"},
+        {"id": "iP95p4xoKVk53GoZ742B", "name": "Chris",      "gender": "male",    "accent": "American",        "language": "en", "desc": "Charming, Down-to-Earth"},
+        {"id": "UgBBYS2sOqTuMpoF3BR0", "name": "Mark",       "gender": "male",    "accent": "American",        "language": "en", "desc": "Natural Conversations"},
+        {"id": "EOVAuWqgSZN2Oel78Psj", "name": "Aidan",      "gender": "male",    "accent": "American",        "language": "en", "desc": "Social Media Influencer"},
+        {"id": "fjnwTZkKtQOJaYzGLa6n", "name": "William",    "gender": "male",    "accent": "British",         "language": "en", "desc": "Deep Engaging Storyteller"},
+        {"id": "wAGzRVkxKEs8La0lmdrE", "name": "Sully",      "gender": "male",    "accent": "American",        "language": "en", "desc": "Mature, Deep & Intriguing"},
+        {"id": "EXAVITQu4vr4xnSDxMaL", "name": "Sarah",      "gender": "female",  "accent": "American",        "language": "en", "desc": "Mature, Reassuring & Confident"},
+        {"id": "FGY2WhTYpPnrIDTdsKH5", "name": "Laura",      "gender": "female",  "accent": "American",        "language": "en", "desc": "Enthusiast, Quirky Attitude"},
+        {"id": "Xb7hH8MSUJpSbSDYk0k2", "name": "Alice",      "gender": "female",  "accent": "British",         "language": "en", "desc": "Clear, Engaging Educator"},
+        {"id": "XrExE9yKIg1WjnnlVkGX", "name": "Matilda",    "gender": "female",  "accent": "American",        "language": "en", "desc": "Knowledgeable & Professional"},
+        {"id": "cgSgspJ2msm6clMCkdW9", "name": "Jessica",    "gender": "female",  "accent": "American",        "language": "en", "desc": "Playful, Bright & Warm"},
+        {"id": "hpp4J3VqNfWAUOO0d1Us", "name": "Bella",      "gender": "female",  "accent": "American",        "language": "en", "desc": "Professional, Bright & Warm"},
+        {"id": "pFZP5JQG7iQjIQuC4Bku", "name": "Lily",       "gender": "female",  "accent": "British",         "language": "en", "desc": "Velvety Actress"},
+        {"id": "F7hCTbeEDbm7osolS21j", "name": "Amanda",     "gender": "female",  "accent": "American",        "language": "en", "desc": "Warm, Polished & Engaging"},
+        {"id": "0fbdXLXuDBZXm2IHek4L", "name": "Veda Sky",   "gender": "female",  "accent": "American",        "language": "en", "desc": "Warm Healthcare Support"},
+        {"id": "l4Coq6695JDX9xtLqXDE", "name": "Lauren",     "gender": "female",  "accent": "American",        "language": "en", "desc": "Empathetic & Encouraging"},
+        {"id": "SAz9YHcvj6GT2YYXdXww", "name": "River",      "gender": "neutral", "accent": "American",        "language": "en", "desc": "Relaxed, Neutral & Informative"},
         {"id": "rPNcQ53R703tTmtue1AT", "name": "Mazen",      "gender": "male",    "accent": "Modern Standard", "language": "ar", "desc": "Deep & Professional, Bilingual"},
-        {"id": "drMurExmkWVIH5nW8snR", "name": "Khaled",     "gender": "male",    "accent": "Palestinian",    "language": "ar", "desc": "Strong & Expressive"},
+        {"id": "drMurExmkWVIH5nW8snR", "name": "Khaled",     "gender": "male",    "accent": "Palestinian",     "language": "ar", "desc": "Strong & Expressive"},
         {"id": "G1HOkzin3NMwRHSq60UI", "name": "Chaouki",    "gender": "male",    "accent": "Modern Standard", "language": "ar", "desc": "Deep, Clear & Engaging"},
-        {"id": "IYnFszSKzmym2OstwHS0", "name": "Hadi",       "gender": "male",    "accent": "Levantine",      "language": "ar", "desc": "Calm Customer Care"},
+        {"id": "IYnFszSKzmym2OstwHS0", "name": "Hadi",       "gender": "male",    "accent": "Levantine",       "language": "ar", "desc": "Calm Customer Care"},
         {"id": "u0TsaWvt0v8migutHM3M", "name": "Ghizlane",   "gender": "female",  "accent": "Modern Standard", "language": "ar", "desc": "Smooth, Distinctive & Calm"},
-        {"id": "jAAHNNqlbAX9iWjJPEtE", "name": "Sara",       "gender": "female",  "accent": "Jordanian",      "language": "ar", "desc": "Soft, Calm & Gentle"},
+        {"id": "jAAHNNqlbAX9iWjJPEtE", "name": "Sara",       "gender": "female",  "accent": "Jordanian",       "language": "ar", "desc": "Soft, Calm & Gentle"},
         {"id": "mRdG9GYEjJmIzqbYTidv", "name": "Sana",       "gender": "female",  "accent": "Modern Standard", "language": "ar", "desc": "Calm, Soft & Honest"},
-        {"id": "mVjOqyqTPfwlXPjV5sjX", "name": "Thierry",    "gender": "male",    "accent": "Quebec",         "language": "fr", "desc": "Professional Concierge"},
-        {"id": "aQROLel5sQbj1vuIVi6B", "name": "Nicolas",    "gender": "male",    "accent": "Parisian",       "language": "fr", "desc": "Narrator"},
-        {"id": "ohItIVrXTBI80RrUECOD", "name": "Guillaume",  "gender": "male",    "accent": "Standard",       "language": "fr", "desc": "Narrator"},
-        {"id": "bjgrAyksP9wfGoNKamR1", "name": "Laurent",    "gender": "male",    "accent": "Standard",       "language": "fr", "desc": "Corporate French Male"},
-        {"id": "HuLbOdhRlvQQN8oPP0AJ", "name": "Claire",     "gender": "female",  "accent": "Standard",       "language": "fr", "desc": "Customer Service"},
-        {"id": "Hy28BjVfgieDVMiyQpQe", "name": "Chloé",      "gender": "female",  "accent": "Standard",       "language": "fr", "desc": "Warm, Friendly & UGC Ready"},
-        {"id": "39BbQfJTexvpWtOQZ4Xr", "name": "Amélie",     "gender": "female",  "accent": "Standard",       "language": "fr", "desc": "Warm & Gentle"},
-        {"id": "tMyQcCxfGDdIt7wJ2RQw", "name": "Marie Alice","gender": "female",  "accent": "Standard",       "language": "fr", "desc": "Soft, Calm & Captivating"},
-        {"id": "TojRWZatQyy9dujEdiQ1", "name": "Koraly",     "gender": "female",  "accent": "Standard",       "language": "fr", "desc": "Storyteller"},
+        {"id": "mVjOqyqTPfwlXPjV5sjX", "name": "Thierry",    "gender": "male",    "accent": "Quebec",          "language": "fr", "desc": "Professional Concierge"},
+        {"id": "aQROLel5sQbj1vuIVi6B", "name": "Nicolas",    "gender": "male",    "accent": "Parisian",        "language": "fr", "desc": "Narrator"},
+        {"id": "ohItIVrXTBI80RrUECOD", "name": "Guillaume",  "gender": "male",    "accent": "Standard",        "language": "fr", "desc": "Narrator"},
+        {"id": "bjgrAyksP9wfGoNKamR1", "name": "Laurent",    "gender": "male",    "accent": "Standard",        "language": "fr", "desc": "Corporate French Male"},
+        {"id": "HuLbOdhRlvQQN8oPP0AJ", "name": "Claire",     "gender": "female",  "accent": "Standard",        "language": "fr", "desc": "Customer Service"},
+        {"id": "Hy28BjVfgieDVMiyQpQe", "name": "Chloé",      "gender": "female",  "accent": "Standard",        "language": "fr", "desc": "Warm, Friendly & UGC Ready"},
+        {"id": "39BbQfJTexvpWtOQZ4Xr", "name": "Amélie",     "gender": "female",  "accent": "Standard",        "language": "fr", "desc": "Warm & Gentle"},
+        {"id": "tMyQcCxfGDdIt7wJ2RQw", "name": "Marie Alice","gender": "female",  "accent": "Standard",        "language": "fr", "desc": "Soft, Calm & Captivating"},
+        {"id": "TojRWZatQyy9dujEdiQ1", "name": "Koraly",     "gender": "female",  "accent": "Standard",        "language": "fr", "desc": "Storyteller"},
     ]
     return jsonify({"voices": voices})
 
