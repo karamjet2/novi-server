@@ -9,7 +9,7 @@ from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 from elevenlabs.client import ElevenLabs
 from dotenv import load_dotenv
-import google.generativeai as genai
+import google.genai as genai
 
 load_dotenv()
 

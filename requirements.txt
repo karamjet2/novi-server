@@ -4,4 +4,4 @@ anthropic
 elevenlabs
 python-dotenv
 gunicorn
-google-generativeai
+google-genai
