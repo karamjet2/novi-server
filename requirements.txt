@@ -1,8 +1,5 @@
 flask
 flask-cors
-anthropic
-elevenlabs
-python-dotenv
-gunicorn
 groq
 requests
+elevenlabs
